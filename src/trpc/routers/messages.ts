@@ -31,5 +31,17 @@ export const messagesRouter = createTRPCRouter({
 
       return newMessage;
     }),
+  
+  getForProject: publicProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(({ input }) => {
+      return db.message.findMany({
+        where: { projectId: input.projectId },
+        // Include the related fragment data
+        include: { fragment: true },
+        // Order messages chronologically
+        orderBy: { createdAt: 'asc' },
+      });
+    }),
 });
 
