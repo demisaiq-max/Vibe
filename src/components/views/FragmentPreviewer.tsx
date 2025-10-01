@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { ExternalLink } from 'lucide-react';
 import type { Fragment } from '@/generated/prisma';
 import { useMemo } from 'react';
+import { FileExplorer } from './FileExplorer';
 
 interface FragmentPreviewerProps {
   fragment: Fragment;
@@ -55,13 +56,9 @@ export function FragmentPreviewer({ fragment }: FragmentPreviewerProps) {
           />
         </TabsContent>
 
-        {/* Tab Content for Code Viewer (Placeholder) */}
-        <TabsContent value="code" className="flex-1 p-4">
-          <h3 className="font-semibold">Generated Code</h3>
-          <p className="text-muted-foreground mt-2">The file explorer will be here.</p>
-          <div className="mt-4 text-xs text-muted-foreground">
-            <p>Files generated: {Object.keys(fragment.files as Record<string, string>).length}</p>
-          </div>
+        {/* Tab Content for Code Viewer (Updated) */}
+        <TabsContent value="code" className="flex-1 overflow-auto p-2 m-0">
+          <FileExplorer fragment={fragment} />
         </TabsContent>
       </Tabs>
     </div>
