@@ -49,11 +49,18 @@ export const createOrUpdateFilesTool = createTool({
       files.map(file => sandbox.files.write(file.path, file.content))
     );
 
-    // Track the created files
+    // Track the created files in the context
     if ((context as any).network?.state) {
       const network = (context as any).network;
-      const existingFiles = network.state.kv.get('files') || [];
-      network.state.kv.set('files', [...existingFiles, ...files.map((f: any) => f.path)]);
+      const existingFiles = (network.state.kv.get('files') as Record<string, string>) || {};
+      const updatedFiles = { ...existingFiles };
+      
+      // Store file contents keyed by path
+      files.forEach((f: any) => {
+        updatedFiles[f.path] = f.content;
+      });
+      
+      network.state.kv.set('files', updatedFiles);
     }
 
     return `Successfully wrote ${files.length} file(s).`;
@@ -85,5 +92,22 @@ export const readFilesTool = createTool({
     );
 
     return JSON.stringify(fileContents, null, 2);
+  },
+});
+
+export const completionTool = createTool({
+  name: 'markComplete',
+  description: 'Call this tool when you have completed the task. Provide a brief summary of what you built.',
+  parameters: z.object({
+    summary: z.string().describe("A brief, one-sentence summary of what was built, starting with 'TASK_SUMMARY: '"),
+  }),
+  handler: async ({ summary }, context) => {
+    // Store the summary in the network state
+    if ((context as any).network?.state) {
+      const network = (context as any).network;
+      network.state.kv.set('summary', summary);
+    }
+
+    return 'Task marked as complete. Summary recorded.';
   },
 });

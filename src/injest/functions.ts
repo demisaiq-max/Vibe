@@ -3,7 +3,8 @@ import { injest } from './client';
 import { createAgent, openai, createNetwork } from '@inngest/agent-kit';
 import { Sandbox } from 'e2b';
 import { SYSTEM_PROMPT } from '@/lib/prompts';
-import { terminalTool, createOrUpdateFilesTool, readFilesTool } from './tools';
+import { terminalTool, createOrUpdateFilesTool, readFilesTool, completionTool } from './tools';
+import { db } from '@/lib/db';
 
 // Define the event payload
 interface CodeAgentRunEvent {
@@ -28,6 +29,7 @@ const codeAgent = createAgent({
     terminalTool,
     createOrUpdateFilesTool,
     readFilesTool,
+    completionTool,
   ],
 });
 
@@ -84,6 +86,7 @@ export const codeAgentFunction = injest.createFunction(
 
     // Get the sandbox URL
     const sandboxUrl = sandbox.getHost(3000);
+    const fullSandboxUrl = sandboxUrl ? `https://${sandboxUrl}` : null;
 
     // Close the sandbox
     await step.run('close-sandbox', async () => {
@@ -93,14 +96,47 @@ export const codeAgentFunction = injest.createFunction(
     console.log('Sandbox closed.');
 
     // Extract results from the network state
-    const summary = result.state?.kv?.get('summary') || 'Agent network completed.';
-    const files = result.state?.kv?.get('files') || [];
+    const summary = result.state?.kv?.get('summary') as string | undefined;
+    const files = result.state?.kv?.get('files') as Record<string, string> || {};
+
+    // Step to save the final result to the database
+    await step.run('save-to-db', async () => {
+      if (!summary) {
+        // Handle cases where the agent failed to provide a summary
+        await db.message.create({
+          data: {
+            projectId: projectId,
+            role: 'assistant',
+            type: 'error',
+            content: 'The AI agent failed to complete the request.',
+          },
+        });
+        return;
+      }
+
+      // Create the assistant's message and the associated fragment
+      await db.message.create({
+        data: {
+          projectId: projectId,
+          role: 'assistant',
+          type: 'result',
+          content: summary,
+          fragment: {
+            create: {
+              title: 'Generated Code', // We will improve this later
+              sandboxUrl: fullSandboxUrl || '',
+              files: files,
+            },
+          },
+        },
+      });
+    });
 
     return {
-      message: 'Agent network completed.',
-      summary,
+      message: 'Process completed and results saved.',
+      summary: summary || 'Agent network completed without summary.',
       files,
-      sandboxUrl: sandboxUrl ? `https://${sandboxUrl}` : null,
+      sandboxUrl: fullSandboxUrl,
       projectId,
     };
   }
