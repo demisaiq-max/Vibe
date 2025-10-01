@@ -1,7 +1,9 @@
 // src/injest/functions.ts
 import { injest } from './client';
-import { createAgent, openai } from '@inngest/agent-kit';
+import { createAgent, openai, createNetwork } from '@inngest/agent-kit';
 import { Sandbox } from 'e2b';
+import { SYSTEM_PROMPT } from '@/lib/prompts';
+import { terminalTool, createOrUpdateFilesTool, readFilesTool } from './tools';
 
 // Define the event payload
 interface CodeAgentRunEvent {
@@ -12,64 +14,94 @@ interface CodeAgentRunEvent {
   };
 }
 
-// A placeholder for our robust system prompt
-const placeholderSystemPrompt = `You are an expert Next.js developer. Your goal is to build a functional Next.js application based on the user's request.`;
-
-// E2B Template ID - This will be generated when you build the template
-// To build: cd e2b && e2b template build
-// Then copy the Template ID from the output and paste it here
+// E2B Template ID
 const E2B_TEMPLATE_ID = process.env.E2B_TEMPLATE_ID || 'abt5vfj6rombuxv4pjst';
 
-// Create the AI agent
+// Create the AI agent with tools
 const codeAgent = createAgent({
   name: 'coding-agent',
-  // We will use the placeholder for now. Later, this will be a detailed prompt.
-  system: placeholderSystemPrompt,
+  system: SYSTEM_PROMPT,
   model: openai({
-    // Recommended model for balance of cost, speed, and capability
     model: 'gpt-4-turbo',
   }),
-  // We will add tools in a later phase
-  // tools: [],
+  tools: [
+    terminalTool,
+    createOrUpdateFilesTool,
+    readFilesTool,
+  ],
+});
+
+// Create the agent network
+const agentNetwork = createNetwork({
+  name: 'coding-agent-network',
+  agents: [codeAgent],
+  defaultModel: openai({
+    model: 'gpt-4-turbo',
+  }),
+  router: ({ network }) => {
+    // Check if the agent has signaled completion
+    const summary = network?.state.kv.get('summary');
+    
+    if (summary) {
+      // Task is complete
+      return undefined;
+    }
+    
+    // Continue with the coding agent
+    return codeAgent;
+  },
 });
 
 export const codeAgentFunction = injest.createFunction(
-  { id: 'code-agent' },
+  { 
+    id: 'code-agent',
+    timeout: '15m', // Increase timeout for complex tasks
+  },
   { event: 'code-agent/run' },
   async ({ event, step }: any) => {
-    const { value: userPrompt } = event.data;
+    const { projectId, value: userPrompt } = event.data;
 
-    // Wrap the sandbox creation in a named step for observability in the Ingest dashboard
+    // Create sandbox
     const sandbox = await step.run('create-sandbox', async () => {
-      // This is the call to E2B's API via the SDK
-      // First argument is the template ID, second is options
       return await Sandbox.create(E2B_TEMPLATE_ID, {
-        // Automatically close the sandbox after 15 minutes of inactivity to save resources
-        timeoutMs: 900000, // 15 minutes in milliseconds
+        timeoutMs: 900000, // 15 minutes
       });
     });
 
     console.log('Sandbox successfully created with ID:', sandbox.sandboxId);
-    
-    // In the next phase, we'll give the agent tools to interact with this sandbox.
-    const result = await step.run('run-agent', async () => {
-      return await codeAgent.run(userPrompt);
+
+    // Run the agent network with the sandbox context
+    const result = await step.run('run-agent-network', async () => {
+      // Run the network with sandbox ID in context
+      const networkResult = await agentNetwork.run(userPrompt, {
+        state: {
+          sandboxId: sandbox.sandboxId,
+        },
+      });
+
+      return networkResult;
     });
 
-    console.log('AI Agent output:', result.output);
+    // Get the sandbox URL
+    const sandboxUrl = sandbox.getHost(3000);
 
-    // It is CRITICAL to close the sandbox when you're done.
-    // Otherwise, it will keep running until the timeout, consuming your free credits.
+    // Close the sandbox
     await step.run('close-sandbox', async () => {
       await sandbox.close();
     });
 
     console.log('Sandbox closed.');
 
-    // We will add logic to save the result here later
+    // Extract results from the network state
+    const summary = result.state?.kv?.get('summary') || 'Agent network completed.';
+    const files = result.state?.kv?.get('files') || [];
+
     return {
-      message: 'Agent run and sandbox cycle completed.',
-      output: result.output,
+      message: 'Agent network completed.',
+      summary,
+      files,
+      sandboxUrl: sandboxUrl ? `https://${sandboxUrl}` : null,
+      projectId,
     };
   }
 );
