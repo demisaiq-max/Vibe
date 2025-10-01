@@ -1,5 +1,6 @@
 // src/injest/functions.ts
 import { injest } from './client';
+import { createAgent, openai } from '@inngest/agent-kit';
 
 // Define the event payload
 interface CodeAgentRunEvent {
@@ -10,19 +11,39 @@ interface CodeAgentRunEvent {
   };
 }
 
+// A placeholder for our robust system prompt
+const placeholderSystemPrompt = `You are an expert Next.js developer. Your goal is to build a functional Next.js application based on the user's request.`;
+
+// Create the AI agent
+const codeAgent = createAgent({
+  name: 'coding-agent',
+  // We will use the placeholder for now. Later, this will be a detailed prompt.
+  system: placeholderSystemPrompt,
+  model: openai({
+    // Recommended model for balance of cost, speed, and capability
+    model: 'gpt-4-turbo',
+  }),
+  // We will add tools in a later phase
+  // tools: [],
+});
+
 export const codeAgentFunction = injest.createFunction(
   { id: 'code-agent' },
   { event: 'code-agent/run' },
   async ({ event, step }: any) => {
-    // We will implement the AI logic here in future phases.
-    // For now, we'll just log the event.
-    console.log('Received event to run code agent:', event.data);
+    const { value: userPrompt } = event.data;
 
-    await step.sleep('wait-a-moment', '1s');
+    // Run the agent with the user's prompt
+    const result = await step.run('run-agent', async () => {
+      return await codeAgent.run(userPrompt);
+    });
 
+    console.log('AI Agent output:', result.output);
+
+    // We will add logic to save the result here later
     return {
-      message: `Background job completed for project: ${event.data.projectId}`,
+      message: 'Agent run completed.',
+      output: result.output,
     };
   }
 );
-
